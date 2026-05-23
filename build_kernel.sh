@@ -5,6 +5,9 @@ echo -e "\n[INFO]: BUILD STARTED..!\n"
 #init submodules
 git submodule init && git submodule update
 
+# Merge defconfigs
+KCONFIG_CONFIG=arch/arm64/configs/merged_defconfig ./scripts/kconfig/merge_config.sh -m arch/arm64/configs/exynos850-a04sxx_defconfig arch/arm64/configs/lesdieuxx.config
+
 export KERNEL_ROOT="$(pwd)"
 export ARCH=arm64
 export PLATFORM_VERSION=12
@@ -87,8 +90,7 @@ export BUILD_OPTIONS=(
 
 build_kernel(){
     # Make default configuration.
-    # Replace 'your_defconfig' with the name of your kernel's defconfig
-    make "${BUILD_OPTIONS[@]}" exynos850-a04sxx_defconfig
+    make "${BUILD_OPTIONS[@]}" merged_defconfig
 
     # Configure the kernel (GUI)
     make "${BUILD_OPTIONS[@]}" menuconfig
