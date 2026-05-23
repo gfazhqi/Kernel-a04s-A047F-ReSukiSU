@@ -46,9 +46,7 @@
 #define FS_OPEN_PERM		0x00010000	/* open event in an permission hook */
 #define FS_ACCESS_PERM		0x00020000	/* access event in a permissions hook */
 
-#define FS_EXCL_UNLINK		0x04000000	/* do not send events if object is unlinked */
 #define FS_ISDIR		0x40000000	/* event occurred against dir */
-#define FS_IN_ONESHOT		0x80000000	/* only send event once */
 
 #define FS_DN_RENAME		0x10000000	/* file renamed */
 #define FS_DN_MULTISHOT		0x20000000	/* dnotify multishot */
@@ -77,8 +75,7 @@
 			     FS_OPEN_PERM | FS_ACCESS_PERM | FS_DN_RENAME)
 
 /* Extra flags that may be reported with event or control handling of events */
-#define ALL_FSNOTIFY_FLAGS  (FS_EXCL_UNLINK | FS_ISDIR | FS_IN_ONESHOT | \
-			     FS_DN_MULTISHOT | FS_EVENT_ON_CHILD)
+#define ALL_FSNOTIFY_FLAGS  (FS_ISDIR | FS_EVENT_ON_CHILD | FS_DN_MULTISHOT)
 
 #define ALL_FSNOTIFY_BITS   (ALL_FSNOTIFY_EVENTS | ALL_FSNOTIFY_FLAGS)
 
@@ -108,6 +105,9 @@ struct fsnotify_ops {
 			    u32 mask, const void *data, int data_type,
 			    const unsigned char *file_name, u32 cookie,
 			    struct fsnotify_iter_info *iter_info);
+	int (*handle_inode_event)(struct fsnotify_mark *mark, u32 mask,
+			    struct inode *inode, struct inode *dir,
+			    const struct qstr *file_name, u32 cookie);
 	void (*free_group_priv)(struct fsnotify_group *group);
 	void (*freeing_mark)(struct fsnotify_mark *mark, struct fsnotify_group *group);
 	void (*free_event)(struct fsnotify_event *event);
@@ -324,9 +324,14 @@ struct fsnotify_mark {
 	struct fsnotify_mark_connector *connector;
 	/* Events types to ignore [mark->lock, group->mark_mutex] */
 	__u32 ignored_mask;
-#define FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY	0x01
-#define FSNOTIFY_MARK_FLAG_ALIVE		0x02
-#define FSNOTIFY_MARK_FLAG_ATTACHED		0x04
+	/* General fsnotify mark flags */
+#define FSNOTIFY_MARK_FLAG_ALIVE		0x0001
+#define FSNOTIFY_MARK_FLAG_ATTACHED		0x0002
+	/* inotify mark flags */
+#define FSNOTIFY_MARK_FLAG_EXCL_UNLINK		0x0010
+#define FSNOTIFY_MARK_FLAG_IN_ONESHOT		0x0020
+	/* fanotify mark flags */
+#define FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY	0x0100
 	unsigned int flags;		/* flags [mark->lock] */
 };
 

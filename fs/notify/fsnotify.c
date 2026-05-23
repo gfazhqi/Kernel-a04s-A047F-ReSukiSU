@@ -187,6 +187,36 @@ int __fsnotify_parent(const struct path *path, struct dentry *dentry, __u32 mask
 }
 EXPORT_SYMBOL_GPL(__fsnotify_parent);
 
+static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
+				 const void *data, int data_type,
+				 struct inode *dir, const struct qstr *name,
+				 u32 cookie, struct fsnotify_iter_info *iter_info)
+{
+	struct fsnotify_mark *inode_mark = fsnotify_iter_inode_mark(iter_info);
+	struct inode *inode = NULL;
+	const struct fsnotify_ops *ops = group->ops;
+
+	switch (data_type) {
+	case (FSNOTIFY_EVENT_PATH):
+		inode = ((const struct path *)data)->dentry->d_inode;
+		break;
+	case (FSNOTIFY_EVENT_INODE):
+		inode = (struct inode *)data;
+		break;
+	default:
+		BUG();
+		return 0;
+	}
+
+	if (WARN_ON_ONCE(!ops->handle_inode_event))
+		return 0;
+
+	if (WARN_ON_ONCE(fsnotify_iter_vfsmount_mark(iter_info)))
+		return 0;
+
+	return ops->handle_inode_event(inode_mark, mask, inode, dir, name, cookie);
+}
+
 static int send_to_group(struct inode *to_tell,
 			 __u32 mask, const void *data,
 			 int data_is, u32 cookie,
@@ -199,6 +229,7 @@ static int send_to_group(struct inode *to_tell,
 	__u32 marks_ignored_mask = 0;
 	struct fsnotify_mark *mark;
 	int type;
+	struct qstr qname = QSTR_INIT(file_name, strlen(file_name));
 
 	if (WARN_ON(!iter_info->report_mask))
 		return 0;
@@ -235,8 +266,13 @@ static int send_to_group(struct inode *to_tell,
 	if (!(test_mask & marks_mask & ~marks_ignored_mask))
 		return 0;
 
-	return group->ops->handle_event(group, to_tell, mask, data, data_is,
-					file_name, cookie, iter_info);
+	if (group->ops->handle_event) {
+		return group->ops->handle_event(group, to_tell, mask, data, data_is,
+                                        file_name, cookie, iter_info);
+	}
+
+	return fsnotify_handle_event(group, mask, data, data_is, to_tell, &qname, 
+				     cookie, iter_info);
 }
 
 static struct fsnotify_mark *fsnotify_first_mark(struct fsnotify_mark_connector **connp)

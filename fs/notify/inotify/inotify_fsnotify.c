@@ -81,7 +81,7 @@ int inotify_handle_event(struct fsnotify_group *group,
 	if (WARN_ON(fsnotify_iter_vfsmount_mark(iter_info)))
 		return 0;
 
-	if ((inode_mark->mask & FS_EXCL_UNLINK) &&
+	if ((inode_mark->flags & FSNOTIFY_MARK_FLAG_EXCL_UNLINK) &&
 	    (data_type == FSNOTIFY_EVENT_PATH)) {
 		const struct path *path = data;
 
@@ -131,7 +131,7 @@ int inotify_handle_event(struct fsnotify_group *group,
 		fsnotify_destroy_event(group, fsn_event);
 	}
 
-	if (inode_mark->mask & IN_ONESHOT)
+	if (inode_mark->flags & FSNOTIFY_MARK_FLAG_IN_ONESHOT)
 		fsnotify_destroy_mark(inode_mark, group);
 
 	return 0;
