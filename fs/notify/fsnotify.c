@@ -189,12 +189,18 @@ EXPORT_SYMBOL_GPL(__fsnotify_parent);
 
 static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 				 const void *data, int data_type,
-				 struct inode *dir, const struct qstr *name,
+				 struct inode *dir, const unsigned char *file_name,
 				 u32 cookie, struct fsnotify_iter_info *iter_info)
 {
 	struct fsnotify_mark *inode_mark = fsnotify_iter_inode_mark(iter_info);
 	struct inode *inode = NULL;
 	const struct fsnotify_ops *ops = group->ops;
+	struct qstr qname = {};
+
+	if (file_name) {
+		qname.name = file_name;
+		qname.len  = strlen(file_name);
+	}
 
 	switch (data_type) {
 	case (FSNOTIFY_EVENT_PATH):
@@ -214,7 +220,7 @@ static int fsnotify_handle_event(struct fsnotify_group *group, __u32 mask,
 	if (WARN_ON_ONCE(fsnotify_iter_vfsmount_mark(iter_info)))
 		return 0;
 
-	return ops->handle_inode_event(inode_mark, mask, inode, dir, name, cookie);
+	return ops->handle_inode_event(inode_mark, mask, inode, dir, &qname, cookie);
 }
 
 static int send_to_group(struct inode *to_tell,
@@ -229,7 +235,6 @@ static int send_to_group(struct inode *to_tell,
 	__u32 marks_ignored_mask = 0;
 	struct fsnotify_mark *mark;
 	int type;
-	struct qstr qname = QSTR_INIT(file_name, strlen(file_name));
 
 	if (WARN_ON(!iter_info->report_mask))
 		return 0;
@@ -271,8 +276,8 @@ static int send_to_group(struct inode *to_tell,
                                         file_name, cookie, iter_info);
 	}
 
-	return fsnotify_handle_event(group, mask, data, data_is, to_tell, &qname, 
-				     cookie, iter_info);
+	return fsnotify_handle_event(group, mask, data, data_is, to_tell, 
+				     file_name, cookie, iter_info);
 }
 
 static struct fsnotify_mark *fsnotify_first_mark(struct fsnotify_mark_connector **connp)
@@ -429,7 +434,7 @@ static __init int fsnotify_init(void)
 {
 	int ret;
 
-	BUG_ON(hweight32(ALL_FSNOTIFY_BITS) != 23);
+	BUG_ON(hweight32(ALL_FSNOTIFY_BITS) != 21);
 
 	ret = init_srcu_struct(&fsnotify_mark_srcu);
 	if (ret)
