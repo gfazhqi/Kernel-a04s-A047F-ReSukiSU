@@ -503,7 +503,10 @@ struct nameidata {
 	struct qstr	last;
 	struct path	root;
 	struct inode	*inode; /* path.dentry.d_inode */
-	unsigned int	flags, state;
+	unsigned int	flags;
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	unsigned int	state;
+#endif
 	unsigned	seq, m_seq;
 	int		last_type;
 	unsigned	depth;
@@ -528,9 +531,11 @@ static void set_nameidata(struct nameidata *p, int dfd, struct filename *name)
 	p->dfd = dfd;
 	p->name = name;
 	p->total_link_count = old ? old->total_link_count : 0;
-	p->state = 0;
 	p->saved = old;
 	current->nameidata = p;
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	p->state = 0;
+#endif
 }
 
 static void restore_nameidata(void)
@@ -1688,6 +1693,13 @@ retry:
 			d_lookup_done(dentry);
 		if (!(flags & LOOKUP_RCU))
 			dput(dentry);
+		// - Just in case if an user app has been granted full file access and
+		//   it is trying to find the fuse sus path with the create flag, then
+		//   at least we can prevent the fake qstr file from from being created,
+		//   although it is futile to do this, it is better than doing nothing.
+		if (dentry->d_inode->i_sb->s_magic == FUSE_SUPER_MAGIC &&
+			(flags & (LOOKUP_CREATE | LOOKUP_EXCL)))
+			return ERR_PTR(-EACCES);
 		dentry = d_alloc(base, &susfs_fake_qstr_name);
 		found_sus_path = true;
 		goto retry;

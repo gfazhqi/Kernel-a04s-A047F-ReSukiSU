@@ -5145,6 +5145,10 @@ int __access_remote_vm(struct task_struct *tsk, struct mm_struct *mm,
 	if (down_read_killable(&mm->mmap_sem))
 		return 0;
 
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+	vma = find_vma(mm, addr);
+#endif
+
 	/* ignore errors, just check how much was successfully transferred */
 	while (len) {
 		int bytes, ret, offset;
