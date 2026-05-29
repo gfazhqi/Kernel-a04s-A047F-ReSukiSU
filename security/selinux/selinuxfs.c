@@ -43,6 +43,7 @@
 #include "conditional.h"
 
 #ifdef CONFIG_KSU_SUSFS
+#include "ss/services.h"
 extern struct selinux_state fake_state;
 extern struct page *fake_status;
 extern struct static_key_false fake_status_initialize_key;
@@ -247,9 +248,9 @@ static int my_sel_open_handle_status(struct inode *inode, struct file *filp)
 	int ret;
 
 	if (likely(current_uid().val >= 10000 && ksu_selinux_hide_enabled)) {
-		mutex_lock(&selinux_state.status_lock);
+		mutex_lock(&selinux_state.ss->status_lock);
 		data = fake_status;
-		mutex_unlock(&selinux_state.status_lock);
+		mutex_unlock(&selinux_state.ss->status_lock);
 		if (data) {
 			filp->private_data = data;
 			return 0;
