@@ -21,6 +21,7 @@
 #include <linux/susfs_def.h>
 #include <linux/version.h>
 #include "mount.h"
+#include "internal.h"
 #endif
 
 #include <linux/uaccess.h>
