@@ -1,0 +1,490 @@
+name: Build A047F ReSukiSU Kernel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Kernel
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            git \
+            curl \
+            wget \
+            bc \
+            bison \
+            flex \
+            build-essential \
+            zip \
+            unzip \
+            cpio \
+            kmod \
+            openssl \
+            libssl-dev \
+            libelf-dev \
+            pahole \
+            libncurses-dev \
+            libtinfo5 \
+            device-tree-compiler \
+            lz4 \
+            xz-utils \
+            zstd \
+            rsync \
+            python3 \
+            python-is-python3 \
+            p7zip-full \
+            android-sdk-libsparse-utils \
+            erofs-utils \
+            libarchive-tools \
+            libxml2-utils \
+            xsltproc \
+            tofrodos
+
+
+      # ============================================================
+      # SUBMODULES
+      # ============================================================
+      - name: Initialize submodules
+        run: |
+          set -e
+
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+
+      # ============================================================
+      # TOOLCHAIN DIRECTORY
+      # ============================================================
+      - name: Prepare toolchain directory
+        run: |
+          mkdir -p "$HOME/toolchains"
+
+
+      # ============================================================
+      # CLANG R353983C
+      # ============================================================
+      - name: Download clang-r353983c
+        run: |
+          set -e
+
+          if [ ! -f "$HOME/toolchains/clang-r353983c/bin/clang" ]; then
+
+            mkdir -p "$HOME/toolchains/clang-r353983c"
+
+            cd "$HOME/toolchains/clang-r353983c"
+
+            curl -L \
+              -o clang-r353983c.tar.gz \
+              "https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/clang-r353983c.tar.gz"
+
+            tar -xf clang-r353983c.tar.gz
+
+            rm -f clang-r353983c.tar.gz
+          fi
+
+          "$HOME/toolchains/clang-r353983c/bin/clang" --version
+
+
+      # ============================================================
+      # ARM GNU TOOLCHAIN 14.2
+      # ============================================================
+      - name: Download ARM GNU toolchain
+        run: |
+          set -e
+
+          GCC_DIR="$HOME/toolchains/gcc/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu"
+
+          if [ ! -f "$GCC_DIR/bin/aarch64-none-linux-gnu-gcc" ]; then
+
+            mkdir -p "$HOME/toolchains/gcc"
+
+            cd "$HOME/toolchains/gcc"
+
+            curl -L \
+              -o arm-gnu-toolchain.tar.xz \
+              "https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
+
+            tar -xf arm-gnu-toolchain.tar.xz
+
+            rm -f arm-gnu-toolchain.tar.xz
+          fi
+
+          "$GCC_DIR/bin/aarch64-none-linux-gnu-gcc" --version
+
+
+      # ============================================================
+      # ENVIRONMENT
+      # ============================================================
+      - name: Configure build environment
+        run: |
+          echo "KERNEL_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+
+          echo "ARCH=arm64" >> "$GITHUB_ENV"
+          echo "PLATFORM_VERSION=12" >> "$GITHUB_ENV"
+          echo "ANDROID_MAJOR_VERSION=s" >> "$GITHUB_ENV"
+          echo "KBUILD_BUILD_USER=HG" >> "$GITHUB_ENV"
+
+          echo "$HOME/toolchains/clang-r353983c/bin" >> "$GITHUB_PATH"
+
+          echo "$HOME/toolchains/gcc/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin" >> "$GITHUB_PATH"
+
+
+      # ============================================================
+      # OUTPUT DIRECTORIES
+      # ============================================================
+      - name: Prepare output directories
+        run: |
+          set -e
+
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          mkdir -p "$GITHUB_WORKSPACE/build"
+
+
+      # ============================================================
+      # SYNC LATEST OFFICIAL RESUKISU
+      # ============================================================
+      - name: Sync latest ReSukiSU from upstream
+        run: |
+          set -e
+
+          cd "$GITHUB_WORKSPACE"
+
+          rm -rf "$GITHUB_WORKSPACE/KernelSU"
+
+          # Official ReSukiSU repository.
+          git clone --depth=1 https://github.com/ReSukiSU/ReSukiSU KernelSU
+
+          # Use the official integration script from that checkout.
+          chmod +x "$GITHUB_WORKSPACE/KernelSU/kernel/setup.sh"
+          "$GITHUB_WORKSPACE/KernelSU/kernel/setup.sh"
+
+          echo ""
+          echo "=========================================="
+          echo "RESUKISU UPSTREAM COMMIT"
+          echo "=========================================="
+
+          git -C "$GITHUB_WORKSPACE/KernelSU" rev-parse --short HEAD
+          git -C "$GITHUB_WORKSPACE/KernelSU" log -1 --oneline
+
+      # ============================================================
+      # MERGE DEFCONFIG
+      #
+      # IMPORTANT:
+      # build_kernel.sh dari repo kamu membuat:
+      #
+      # arch/arm64/configs/merged_defconfig
+      #
+      # bukan out/.config
+      # ============================================================
+      - name: Merge A04s defconfig
+        run: |
+          set -e
+
+          export ARCH=arm64
+
+          # Keep the existing known-good A047F config, but stop using
+          # the old Lesdieuxx filename inside the build workflow.
+          if [ -f arch/arm64/configs/lesdieuxx.config ]; then
+            cp arch/arm64/configs/lesdieuxx.config               arch/arm64/configs/hg_a047f.config
+          elif [ ! -f arch/arm64/configs/hg_a047f.config ]; then
+            echo "ERROR: A047F config not found."
+            exit 1
+          fi
+
+          rm -f arch/arm64/configs/merged_defconfig
+
+          KCONFIG_CONFIG="$GITHUB_WORKSPACE/arch/arm64/configs/merged_defconfig" \
+          ./scripts/kconfig/merge_config.sh -m \
+            arch/arm64/configs/exynos850-a04sxx_defconfig \
+            arch/arm64/configs/hg_a047f.config
+
+          echo ""
+          echo "=========================================="
+          echo "MERGED DEFCONFIG"
+          echo "=========================================="
+
+          ls -lh arch/arm64/configs/merged_defconfig
+
+
+      # ============================================================
+      # GENERATE CONFIGURATION
+      # ============================================================
+      - name: Generate kernel configuration
+        run: |
+          set -e
+
+          make \
+            -C "$GITHUB_WORKSPACE" \
+            O="$GITHUB_WORKSPACE/out" \
+            ARCH=arm64 \
+            CROSS_COMPILE="$HOME/toolchains/gcc/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-" \
+            CC="$HOME/toolchains/clang-r353983c/bin/clang" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            merged_defconfig
+
+
+      # ============================================================
+      # SHOW CONFIG
+      # ============================================================
+      - name: Check final kernel configuration
+        run: |
+          set -e
+
+          echo ""
+          echo "=========================================="
+          echo "CONFIGURATION CHECK"
+          echo "=========================================="
+
+          test -f "$GITHUB_WORKSPACE/out/.config"
+
+          ls -lh "$GITHUB_WORKSPACE/out/.config"
+
+          echo ""
+          echo "KernelSU configuration:"
+
+          grep -E \
+            "CONFIG_KSU|CONFIG_KSU_SUSFS" \
+            "$GITHUB_WORKSPACE/out/.config" \
+            || true
+
+
+      # ============================================================
+      # BUILD IMAGE
+      # ============================================================
+      - name: Build kernel Image
+        run: |
+          set -e
+
+          make \
+            -C "$GITHUB_WORKSPACE" \
+            O="$GITHUB_WORKSPACE/out" \
+            ARCH=arm64 \
+            CROSS_COMPILE="$HOME/toolchains/gcc/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-" \
+            CC="$HOME/toolchains/clang-r353983c/bin/clang" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            -j"$(nproc)" \
+            Image
+
+
+      # ============================================================
+      # VERIFY IMAGE
+      # ============================================================
+      - name: Verify kernel Image
+        run: |
+          set -e
+
+          IMAGE="$GITHUB_WORKSPACE/out/arch/arm64/boot/Image"
+
+          if [ ! -f "$IMAGE" ]; then
+            echo "ERROR: Kernel Image tidak ditemukan!"
+            exit 1
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "KERNEL BUILD SUCCESS"
+          echo "=========================================="
+
+          ls -lh "$IMAGE"
+
+          file "$IMAGE"
+
+
+      # ============================================================
+      # COPY IMAGE
+      # ============================================================
+      - name: Copy kernel Image
+        run: |
+          cp \
+            "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image" \
+            "$GITHUB_WORKSPACE/build/Image"
+
+
+      # ============================================================
+      # UPLOAD IMAGE
+      # ============================================================
+      - name: Upload kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: A047F-ReSukiSU-Image
+          path: build/Image
+          if-no-files-found: error
+
+
+      # ============================================================
+      # ANYKERNEL3
+      # ============================================================
+      - name: Clone AnyKernel3
+        run: |
+          set -e
+
+          git clone             --depth=1             https://github.com/osm0sis/AnyKernel3.git             "$GITHUB_WORKSPACE/AnyKernel3"
+
+          rm -rf "$GITHUB_WORKSPACE/AnyKernel3/.git"
+
+      # ============================================================
+      # CONFIGURE A047F ANYKERNEL3
+      # ============================================================
+      - name: Configure AnyKernel3 for Samsung A04s
+        run: |
+          set -e
+
+          AK="$GITHUB_WORKSPACE/AnyKernel3/anykernel.sh"
+
+          cat > "$AK" <<'AKSCRIPT'
+      #!/bin/bash
+
+      properties() { '
+      kernel.string=HG ReSukiSU Kernel | Samsung A04s A047F
+      do.devicecheck=1
+      do.modules=0
+      do.systemless=1
+      do.cleanup=1
+      do.cleanuponabort=0
+      device.name1=a04s
+      device.name2=A047F
+      device.name3=SM-A047F
+      device.name4=
+      device.name5=
+      supported.versions=
+      supported.patchlevels=
+      supported.vendorpatchlevels=
+      '; } # end properties
+
+      # Samsung A04s boot partition.
+      BLOCK=/dev/block/bootdevice/by-name/boot;
+      IS_SLOT_DEVICE=0;
+      RAMDISK_COMPRESSION=auto;
+      PATCH_VBMETA_FLAG=auto;
+
+      . tools/ak3-core.sh;
+
+      ui_print " ";
+      ui_print "╔══════════════════════════════════════╗";
+      ui_print "║              H G                     ║";
+      ui_print "║        SAMSUNG A04s | A047F          ║";
+      ui_print "║          ReSukiSU + SUSFS            ║";
+      ui_print "║       BUILT KERNEL BY HG             ║";
+      ui_print "╚══════════════════════════════════════╝";
+      ui_print " ";
+      ui_print "Official ReSukiSU Manager is NOT bundled.";
+      ui_print " ";
+
+      dump_boot;
+      write_boot;
+      AKSCRIPT
+
+          chmod +x "$AK"
+
+          echo "=========================================="
+          echo "A047F ANYKERNEL3 CONFIG"
+          echo "=========================================="
+
+          grep -E             "kernel.string|do.devicecheck|device.name|BLOCK=|IS_SLOT_DEVICE|RAMDISK_COMPRESSION|PATCH_VBMETA_FLAG"             "$AK"
+
+      # ============================================================
+      # COPY IMAGE TO ANYKERNEL3
+      # ============================================================
+      - name: Copy Image to AnyKernel3
+        run: |
+          set -e
+
+          cp             "$GITHUB_WORKSPACE/build/Image"             "$GITHUB_WORKSPACE/AnyKernel3/Image"
+
+          ls -lh "$GITHUB_WORKSPACE/AnyKernel3/Image"
+
+      # ============================================================
+      # VERIFY A047F PACKAGE
+      # ============================================================
+      - name: Verify A047F package
+        run: |
+          set -e
+
+          AK="$GITHUB_WORKSPACE/AnyKernel3/anykernel.sh"
+
+          grep -q "device.name1=a04s" "$AK"
+          grep -q "device.name2=A047F" "$AK"
+          grep -q "device.name3=SM-A047F" "$AK"
+
+          if grep -Eq "maguro|toro|toroplus|tuna|omap_hsmmc|init\.tuna|fstab\.tuna" "$AK"; then
+            echo "ERROR: Old Galaxy Nexus/AnyKernel template detected."
+            exit 1
+          fi
+
+          test -f "$GITHUB_WORKSPACE/AnyKernel3/Image"
+
+          echo "A047F AnyKernel3 verification: PASS"
+
+      # ============================================================
+      # PACK ZIP
+      # ============================================================
+      - name: Pack AnyKernel3 ZIP
+        run: |
+          set -e
+
+          cd "$GITHUB_WORKSPACE/AnyKernel3"
+
+          ZIP_NAME="HG-A047F-ReSukiSU-$(date +%Y%m%d-%H%M).zip"
+
+          zip -r9 \
+            "$GITHUB_WORKSPACE/build/$ZIP_NAME" \
+            . \
+            -x "*.git*" \
+            -x "*.zip"
+
+          echo ""
+          echo "=========================================="
+          echo "ZIP CREATED"
+          echo "=========================================="
+
+          ls -lh "$GITHUB_WORKSPACE/build/$ZIP_NAME"
+
+
+      # ============================================================
+      # UPLOAD ZIP
+      # ============================================================
+      - name: Upload AnyKernel3 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: A047F-ReSukiSU-HG-AnyKernel3
+          path: build/*.zip
+          if-no-files-found: error
+
+
+      # ============================================================
+      # BUILD LOGS
+      # ============================================================
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A047F-build-logs
+          path: |
+            out/.config
+            out/.config.old
+            arch/arm64/configs/merged_defconfig
+            arch/arm64/configs/hg_a047f.config
+          if-no-files-found: ignore
